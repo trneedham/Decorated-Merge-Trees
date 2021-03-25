@@ -23,17 +23,35 @@ A collection of functions for manipulating, visualizing and comparing merge tree
 and merge trees decorated with persistence data.
 
 Merge trees are handled as pairs T, height, where
- *** T is a networkx graph. It must be a tree, but we don't have any exceptions
-        in this version of the code if this is not the case. User beware!
+ *** T is a networkx graph. It must be a tree.
+        KNOWN ISSUE: We don't currently have any exceptions in this version of the code if T is not a tree.
+                    If this is the case, some functions will give errors.
  *** height is a dictionary. It's keys are nodeIDs of T and its values are heights of those
         nodes in the merge tree. These heights should satisfy certain conditions for this
-        to really be a merge tree, but this version of the code doesn't check them. User beware!
+        to really be a merge tree.
+        KNOWN ISSUE: This version of the code doesn't check height conditions, which can lead to
+                        errors for some functions.
+
+The functions which create merge trees from data should result in valid T and height.
+_______________________________________________________________________________________
+
+Theoretical and computational aspects of decorated merge trees are described in our paper
+
+"Decorated Merge Trees for Persistence" by Justin Curry, Haibin Hang, Washington Mio, Tom Needham and Osman Okutan.
+
+Please cite this paper if you use this code in your own research. Please feel free to contact us with questions
+or issues with the code.
 """
+
 """
 Helper Functions
 """
 
 def invert_label_dict(label):
+
+    """
+    Takes a dictionary {key:item} and returns a new dictionary {item:key}
+    """
 
     inverted_label = dict()
 
@@ -49,7 +67,10 @@ def invert_label_dict(label):
 
 def get_key(dictionary, val):
 
-    # Given a dictionary and a value, returns list of keys with that value
+    """
+    Given a dictionary and a value, returns list of keys with that value
+    """
+
     res = []
     for key, value in dictionary.items():
          if val == value:
@@ -58,19 +79,127 @@ def get_key(dictionary, val):
     return res
 
 def matrix_ell_infinity_distance(M1,M2):
-    # Inputs: two numpy arrays of the same size
-    # Output: \ell_\infty distance between the matrices
+    """
+    Inputs: two numpy arrays of the same size
+    Output: \ell_\infty distance between the matrices
+    """
 
     M = np.abs(M1 - M2)
     dist = np.max(M)
 
     return dist
 
+"""
+TDA functions
+"""
+
 def remove_short_bars(dgm, thresh=0.01):
+
+    """
+    Takes a persistence diagram and removes points whose persistence is < thresh
+    """
 
     dgm_thresh = dgm[dgm[:,1]-dgm[:,0] > thresh]
 
     return dgm_thresh
+
+
+def bottleneck(dgm1, dgm2, matching=False):
+
+    """
+    This function is from the `persim` package, with some light edits.
+    """
+
+    """
+    Perform the Bottleneck distance matching between persistence diagrams.
+    Assumes first two columns of S and T are the coordinates of the persistence
+    points, but allows for other coordinate columns (which are ignored in
+    diagonal matching).
+    See the `distances` notebook for an example of how to use this.
+    Parameters
+    -----------
+    dgm1: Mx(>=2)
+        array of birth/death pairs for PD 1
+    dgm2: Nx(>=2)
+        array of birth/death paris for PD 2
+    matching: bool, default False
+        if True, return matching infromation and cross-similarity matrix
+    Returns
+    --------
+    d: float
+        bottleneck distance between dgm1 and dgm2
+    (matching, D): Only returns if `matching=True`
+        (tuples of matched indices, (N+M)x(N+M) cross-similarity matrix)
+    """
+
+    return_matching = matching
+
+    S = np.array(dgm1)
+    M = min(S.shape[0], S.size)
+    if S.size > 0:
+        S = S[np.isfinite(S[:, 1]), :]
+        if S.shape[0] < M:
+            M = S.shape[0]
+    T = np.array(dgm2)
+    N = min(T.shape[0], T.size)
+    if T.size > 0:
+        T = T[np.isfinite(T[:, 1]), :]
+        if T.shape[0] < N:
+            N = T.shape[0]
+
+    if M == 0:
+        S = np.array([[0, 0]])
+        M = 1
+    if N == 0:
+        T = np.array([[0, 0]])
+        N = 1
+
+    # Step 1: Compute CSM between S and T, including points on diagonal
+    # L Infinity distance
+    Sb, Sd = S[:, 0], S[:, 1]
+    Tb, Td = T[:, 0], T[:, 1]
+    D1 = np.abs(Sb[:, None] - Tb[None, :])
+    D2 = np.abs(Sd[:, None] - Td[None, :])
+    DUL = np.maximum(D1, D2)
+
+    # Put diagonal elements into the matrix, being mindful that Linfinity
+    # balls meet the diagonal line at a diamond vertex
+    D = np.zeros((M + N, M + N))
+    D[0:M, 0:N] = DUL
+    UR = np.max(D) * np.ones((M, M))
+    np.fill_diagonal(UR, 0.5 * (S[:, 1] - S[:, 0]))
+    D[0:M, N::] = UR
+    UL = np.max(D) * np.ones((N, N))
+    np.fill_diagonal(UL, 0.5 * (T[:, 1] - T[:, 0]))
+    D[M::, 0:N] = UL
+
+    # Step 2: Perform a binary search + Hopcroft Karp to find the
+    # bottleneck distance
+    M = D.shape[0]
+    ds = np.sort(np.unique(D.flatten()))
+    bdist = ds[-1]
+    matching = {}
+    while len(ds) >= 1:
+        idx = 0
+        if len(ds) > 1:
+            idx = bisect_left(range(ds.size), int(ds.size / 2))
+        d = ds[idx]
+        graph = {}
+        for i in range(M):
+            graph["%s" % i] = {j for j in range(M) if D[i, j] <= d}
+        res = HopcroftKarp(graph).maximum_matching()
+        if len(res) == 2 * M and d <= bdist:
+            bdist = d
+            matching = res
+            ds = ds[0:idx]
+        else:
+            ds = ds[idx + 1::]
+
+    if return_matching:
+        matchidx = [(i, matching["%i" % i]) for i in range(M)]
+        return bdist, (matchidx, D)
+    else:
+        return bdist
 
 """
 Plotting Functions
@@ -136,8 +265,12 @@ def mergeTree_pos(G, height, root=None, width=1.0, xcenter = 0.5):
     return _hierarchy_pos(G, root, vert_loc, width, xcenter)
 
 def draw_merge_tree(G,height,axes=False):
-    # Input: merge tree as G, height
-    # Output: draws the merge tree with correct node heights
+
+    """
+    Input: merge tree as G, height
+    Output: draws the merge tree with correct node heights
+    """
+
     pos = mergeTree_pos(G,height)
     fig, ax = plt.subplots()
     nx.draw_networkx(G, pos=pos, with_labels=True)
@@ -147,8 +280,10 @@ def draw_merge_tree(G,height,axes=False):
 
 def draw_labeled_merge_tree(T,height,label,axes = False):
 
-    # Input: merge tree as T, height. Label dictionary label with labels for certain nodes
-    # Output: draws the merge tree with labels over the labeled nodes
+    """
+    Input: merge tree as T, height. Label dictionary label with labels for certain nodes
+    Output: draws the merge tree with labels over the labeled nodes
+    """
 
     pos = mergeTree_pos(T,height)
 
@@ -168,6 +303,16 @@ Merge Tree Processing
 """
 
 def least_common_ancestor(G,height,vertex1,vertex2):
+
+    """
+    An ancestor of a vertex v1 in a merge tree is a vertex w such that there exists an
+    increasing path from v1 to w.
+    A common ancestor of v1 and v2 is a vertex w which is an ancestor to both.
+    Their least common ancestor is the common ancestor with the minimum height.
+
+    Input: merge tree as G, height. Two vertices vertex1, vertex 2.
+    Output: node index LCA_idx and height LCA_height of the vertices' least common ancestor.
+    """
 
     height_vals = list(height.values())
     max_height = max(height_vals)
@@ -218,7 +363,15 @@ def get_ultramatrix_and_idx_dict(G,height,label):
     return M, idx_dict
 
 """
-Matching merge trees and estimating interleaving distance
+Matching merge trees and estimating interleaving distance.
+
+Functions in this block are all used to estimate the interleaving distance between merge trees.
+"""
+
+
+"""
+The first few functions are used to subdivide a merge tree by adding degree-2 vertices along edge_list
+at user-defined heights. This can improve the accuracy of the merge tree interleaving computation.
 """
 
 def get_heights(height1,height2,mesh):
@@ -231,36 +384,6 @@ def get_heights(height1,height2,mesh):
     all_heights = np.linspace(m,M,num_samples+1)
 
     return all_heights
-
-# def subdivide_edges(G,height,subdiv_heights):
-#
-#     G_sub = G.copy()
-#     height_sub = height.copy()
-#     node_idx_counter = max(G.nodes()) + 1
-#
-#     for edge in G.edges():
-#         if height[edge[0]] < height[edge[1]]:
-#             v1 = edge[0]
-#             v2 = edge[1]
-#         else:
-#             v1 = edge[1]
-#             v2 = edge[0]
-#         height1 = height[v1]
-#         height2 = height[v2]
-#
-#         for h in subdiv_heights:
-#
-#             if height1 < h and h < height2:
-#                 G_sub.remove_edge(v1,v2)
-#                 G_sub.add_edges_from([(v1,node_idx_counter),(node_idx_counter,v2)])
-#                 height_sub[node_idx_counter] = h
-#                 height1 = h
-#                 v1 = node_idx_counter
-#                 node_idx_counter += 1
-#
-#
-#
-#     return G_sub, height_sub
 
 def subdivide_edges_single_height(G,height,subdiv_height):
 
@@ -294,10 +417,16 @@ def get_heights_and_subdivide_edges(G,height1,height2,mesh):
 
     return subdivide_edges(G,height1,all_heights)
 
+"""
+Below is the main function for estimating interleaving distance using Gromov-Wasserstein couplings.
+"""
+
 def interleaving_subdivided_trees(T1_sub,height1_sub,T2_sub,height2_sub):
 
-    # Input: pair of merge trees
-    # Output: dictionary of matching data
+    """
+    Input: pair of merge trees
+    Output: dictionary of matching data
+    """
 
     ####
     #Get initial data
@@ -337,16 +466,6 @@ def interleaving_subdivided_trees(T1_sub,height1_sub,T2_sub,height2_sub):
         # Add ordered pair to Pi
         Pi.append((leaf,idx_dict2[matched_node_coup_idx]))
 
-        # # Find other ordered pairs to add to Pi
-        # matched_node_column = coup[:,matched_node_coup_idx]
-        # matched_node_column_support = [j for j in list(np.argwhere(matched_node_column > thresh).T[0]) if j != leaf_node]
-        #
-        # for matched_node in matched_node_column_support:
-        #
-        #     if np.argmax(coup[matched_node,:]) == matched_node_coup_idx:
-        #
-        #         Pi.append((idx_dict1[matched_node],idx_dict2[matched_node_coup_idx]))
-
     for leaf in leaf_nodes2:
 
         leaf_node = get_key(idx_dict2,leaf)[0]
@@ -356,16 +475,6 @@ def interleaving_subdivided_trees(T1_sub,height1_sub,T2_sub,height2_sub):
 
         # Add ordered pair to Pi
         Pi.append((idx_dict1[matched_node_coup_idx],leaf))
-
-        # # Find other ordered pairs to add to Pi
-        # matched_node_row = coup[matched_node_coup_idx,:]
-        # matched_node_row_support = [j for j in list(np.argwhere(matched_node_row > thresh).T[0]) if j != leaf_node]
-        #
-        # for matched_node in matched_node_row_support:
-        #
-        #     if np.argmax(coup[:,matched_node]) == matched_node_coup_idx:
-        #
-        #         Pi.append((idx_dict1[matched_node_coup_idx],idx_dict2[matched_node)[0]))
 
     Pi = list(set(Pi))
 
@@ -414,118 +523,11 @@ def interleaving_subdivided_trees(T1_sub,height1_sub,T2_sub,height2_sub):
 
     return res
 
-# def interleaving_subdivided_trees(T1_sub,height1_sub,T2_sub,height2_sub,thresh = 1e-5):
-#
-#     # Input: pair of merge trees
-#     # Output: dictionary of matching data
-#
-#     ####
-#     #Get initial data
-#     ####
-#
-#     # Get cost matrices and dictionaries
-#     label1 = {n:n for n in T1_sub.nodes()}
-#     label2 = {n:n for n in T2_sub.nodes()}
-#     C1, idx_dict1 = get_ultramatrix_and_idx_dict(T1_sub,height1_sub,label1)
-#     C2, idx_dict2 = get_ultramatrix_and_idx_dict(T2_sub,height2_sub,label2)
-#
-#     # Get leaf node labels
-#     leaf_nodes1 = [n for n in T1_sub.nodes() if T1_sub.degree(n) == 1 and n != get_key(height1_sub,max(list(height1_sub.values())))[0]]
-#     leaf_nodes2 = [n for n in T2_sub.nodes() if T2_sub.degree(n) == 1 and n != get_key(height2_sub,max(list(height2_sub.values())))[0]]
-#
-#     # Compute coupling
-#     p1 = ot.unif(C1.shape[0])
-#     p2 = ot.unif(C2.shape[0])
-#
-#     loss_fun = 'square_loss'
-#     d, log = ot.gromov.gromov_wasserstein2(C1,C2,p1,p2,loss_fun)
-#     coup = log['T']
-#
-#     ####
-#     #Create list of matched points Pi
-#     ####
-#
-#     Pi = []
-#     for leaf_node in leaf_nodes1:
-#
-#         # Find where the leaf is matched
-#         matched_node_coup_idx = np.argmax(coup[leaf_node,:])
-#
-#         # Add ordered pair to Pi
-#         Pi.append((leaf_node,get_key(idx_dict2,matched_node_coup_idx)[0]))
-#
-#         # Find other ordered pairs to add to Pi
-#         matched_node_column = coup[:,matched_node_coup_idx]
-#         matched_node_column_support = [j for j in list(np.argwhere(matched_node_column > thresh).T[0]) if j != leaf_node]
-#
-#         for matched_node in matched_node_column_support:
-#
-#             if np.argmax(coup[matched_node,:]) == matched_node_coup_idx:
-#
-#                 Pi.append((get_key(idx_dict1,matched_node)[0],get_key(idx_dict2,matched_node_coup_idx)[0]))
-#
-#     for leaf_node in leaf_nodes2:
-#
-#         # Find where the leaf is matched
-#         matched_node_coup_idx = np.argmax(coup[:,leaf_node])
-#
-#         # Add ordered pair to Pi
-#         Pi.append((get_key(idx_dict1,matched_node_coup_idx)[0],leaf_node))
-#
-#         # Find other ordered pairs to add to Pi
-#         matched_node_row = coup[matched_node_coup_idx,:]
-#         matched_node_row_support = [j for j in list(np.argwhere(matched_node_row > thresh).T[0]) if j != leaf_node]
-#
-#         for matched_node in matched_node_row_support:
-#
-#             if np.argmax(coup[:,matched_node]) == matched_node_coup_idx:
-#
-#                 Pi.append((get_key(idx_dict1,matched_node_coup_idx)[0],get_key(idx_dict2,matched_node)[0]))
-#
-#     Pi = list(set(Pi))
-#
-#     ####
-#     # Create labels based on Pi
-#     ####
-#
-#     labels1New = dict()
-#     labels2New = dict()
-#
-#     for j, pair in enumerate(Pi):
-#
-#         if pair[0] in labels1New.keys():
-#             labels1New[pair[0]].append(j)
-#         else:
-#             labels1New[pair[0]] = [j]
-#
-#         if pair[1] in labels2New.keys():
-#             labels2New[pair[1]].append(j)
-#         else:
-#             labels2New[pair[1]] = [j]
-#
-#     ####
-#     # Create new ultramatrices and compute interleaving distance
-#     ####
-#
-#     C1New = get_ultramatrix(T1_sub,height1_sub,labels1New)
-#     C2New = get_ultramatrix(T2_sub,height2_sub,labels2New)
-#     dist = matrix_ell_infinity_distance(C1New,C2New)
-#
-#     ####
-#     # Collect results for output
-#     ####
-#
-#     res = dict()
-#     res['coupling'] = coup
-#     res['label1'] = labels1New
-#     res['label2'] = labels2New
-#     res['ultra1'] = C1New
-#     res['ultra2'] = C2New
-#     res['dist'] = dist
-#
-#     return res
-
 def subdivide_and_compute_distance(T1,height1,T2,height2,mesh):
+
+    """
+    Combines the functions above.
+    """
 
     T1_sub, height1_sub = get_heights_and_subdivide_edges(T1,height1,height2,mesh)
     T2_sub, height2_sub = get_heights_and_subdivide_edges(T2,height2,height1,mesh)
@@ -790,6 +792,10 @@ def fusedGW_subdivide_and_compute_decorated_distance(T1,height1,barcodes1,
                                                      T2,height2,barcodes2,
                                                      mesh, thresh = 1e-5, alpha = 1/2, armijo = True, degree_weight = True):
 
+    """
+    Combines the functions above.
+    """
+
     T1_sub, height1_sub = get_heights_and_subdivide_edges(T1,height1,height2,mesh)
     T2_sub, height2_sub = get_heights_and_subdivide_edges(T2,height2,height1,mesh)
 
@@ -804,102 +810,6 @@ def fusedGW_subdivide_and_compute_decorated_distance(T1,height1,barcodes1,
 
     return T1_sub, height1_sub, T2_sub, height2_sub, res, dist
 
-
-"""
-The following function is from the `persim` package, with some light edits.
-"""
-
-def bottleneck(dgm1, dgm2, matching=False):
-    """
-    Perform the Bottleneck distance matching between persistence diagrams.
-    Assumes first two columns of S and T are the coordinates of the persistence
-    points, but allows for other coordinate columns (which are ignored in
-    diagonal matching).
-    See the `distances` notebook for an example of how to use this.
-    Parameters
-    -----------
-    dgm1: Mx(>=2)
-        array of birth/death pairs for PD 1
-    dgm2: Nx(>=2)
-        array of birth/death paris for PD 2
-    matching: bool, default False
-        if True, return matching infromation and cross-similarity matrix
-    Returns
-    --------
-    d: float
-        bottleneck distance between dgm1 and dgm2
-    (matching, D): Only returns if `matching=True`
-        (tuples of matched indices, (N+M)x(N+M) cross-similarity matrix)
-    """
-
-    return_matching = matching
-
-    S = np.array(dgm1)
-    M = min(S.shape[0], S.size)
-    if S.size > 0:
-        S = S[np.isfinite(S[:, 1]), :]
-        if S.shape[0] < M:
-            M = S.shape[0]
-    T = np.array(dgm2)
-    N = min(T.shape[0], T.size)
-    if T.size > 0:
-        T = T[np.isfinite(T[:, 1]), :]
-        if T.shape[0] < N:
-            N = T.shape[0]
-
-    if M == 0:
-        S = np.array([[0, 0]])
-        M = 1
-    if N == 0:
-        T = np.array([[0, 0]])
-        N = 1
-
-    # Step 1: Compute CSM between S and T, including points on diagonal
-    # L Infinity distance
-    Sb, Sd = S[:, 0], S[:, 1]
-    Tb, Td = T[:, 0], T[:, 1]
-    D1 = np.abs(Sb[:, None] - Tb[None, :])
-    D2 = np.abs(Sd[:, None] - Td[None, :])
-    DUL = np.maximum(D1, D2)
-
-    # Put diagonal elements into the matrix, being mindful that Linfinity
-    # balls meet the diagonal line at a diamond vertex
-    D = np.zeros((M + N, M + N))
-    D[0:M, 0:N] = DUL
-    UR = np.max(D) * np.ones((M, M))
-    np.fill_diagonal(UR, 0.5 * (S[:, 1] - S[:, 0]))
-    D[0:M, N::] = UR
-    UL = np.max(D) * np.ones((N, N))
-    np.fill_diagonal(UL, 0.5 * (T[:, 1] - T[:, 0]))
-    D[M::, 0:N] = UL
-
-    # Step 2: Perform a binary search + Hopcroft Karp to find the
-    # bottleneck distance
-    M = D.shape[0]
-    ds = np.sort(np.unique(D.flatten()))
-    bdist = ds[-1]
-    matching = {}
-    while len(ds) >= 1:
-        idx = 0
-        if len(ds) > 1:
-            idx = bisect_left(range(ds.size), int(ds.size / 2))
-        d = ds[idx]
-        graph = {}
-        for i in range(M):
-            graph["%s" % i] = {j for j in range(M) if D[i, j] <= d}
-        res = HopcroftKarp(graph).maximum_matching()
-        if len(res) == 2 * M and d <= bdist:
-            bdist = d
-            matching = res
-            ds = ds[0:idx]
-        else:
-            ds = ds[idx + 1::]
-
-    if return_matching:
-        matchidx = [(i, matching["%i" % i]) for i in range(M)]
-        return bdist, (matchidx, D)
-    else:
-        return bdist
 
 """
 Decorated Merge Tree Processing
@@ -971,45 +881,6 @@ def simplify_decorated_merge_tree(T,height,leaf_barcode,thresh):
 
     return T_thresh, height_thresh, leaf_barcode_thresh
 
-# def simplify_decorated_merge_tree(T,height,leaf_barcode,thresh):
-#
-#     """
-#     Simplifies a decorated merge tree as follows. Makes a cut at the threshold height.
-#     Below each vertex at the cut, all nodes are merged to a single leaf at the lowest
-#     height for that branch. The barcode for that leaf is kept.
-#     """
-#
-#     subdiv_heights = [thresh]
-#
-#     T_sub, height_sub = subdivide_edges(T,height,subdiv_heights)
-#     node_barcode_sub = propagate_leaf_barcodes(T_sub,height_sub,leaf_barcode)
-#
-#     height_array = np.array(list(set(height_sub.values())))
-#     height_array_thresh = height_array[height_array >= thresh]
-#
-#     kept_nodes = []
-#
-#     for j in range(len(height_array_thresh)):
-#         kept_nodes += get_key(height_sub,height_array_thresh[j])
-#
-#     T_thresh = T_sub.subgraph(kept_nodes).copy()
-#     height_thresh = {n:height_sub[n] for n in kept_nodes}
-#
-#     root = get_key(height_thresh,max(list(height_thresh.values())))[0]
-#     T_thresh_leaves = [n for n in T_thresh.nodes() if T_thresh.degree(n) == 1 and n != root]
-#
-#     for n in T_thresh_leaves:
-#         descendents = get_descendent_leaves(T_sub,height_sub,n)
-#         descendent_node_rep = list(set(get_key(height_sub,min([height[node] for node in descendents]))).intersection(set(descendents)))[0]
-#         T_thresh.add_edge(n,descendent_node_rep)
-#         height_thresh[descendent_node_rep] = height_sub[descendent_node_rep]
-#
-#     node_barcode_thresh = {n:node_barcode_sub[n] for n in T_thresh.nodes()}
-#
-#     leaf_nodes = [n for n in T_thresh.nodes() if T_thresh.degree(n) == 1 and n != root]
-#     leaf_barcode_thresh = {n:node_barcode_sub[n] for n in leaf_nodes}
-#
-#     return T_thresh, height_thresh, node_barcode_thresh, leaf_barcode_thresh
 
 """
 Decorated Merge Trees for Networks
@@ -1073,17 +944,6 @@ def get_merge_tree_from_network(G,f):
 
     return T, merge_tree_heights
 
-# def reorder_nodes(G,f):
-#
-#     GG = G.copy()
-#     sorted_f = np.sort(list(f.values()))
-#     sorted_indices = np.argsort(list(f.values()))
-#     mapping = {sorted_indices[j]:n for (j,n) in enumerate(G.nodes())}
-#
-#     G_new = nx.relabel_nodes(GG, mapping)
-#     f_new = {j:sorted_f[j] for j in range(len(sorted_f))}
-#
-#     return G_new, f_new
 
 def perturb_function(f, perturbation = 1e-10):
 
@@ -1229,81 +1089,6 @@ def decorate_merge_tree_networks(T,heights,dgm):
 
     return leaf_barcodes
 
-# def decorate_merge_tree_networks(T,heights,dgm):
-#
-#     """
-#     Inputs: merge tree (T,height), degree-1 persistence diagram as a list of lists of birth-death pairs
-#     Output: dictionary of barcodes associated to each leaf of the merge tree
-#     """
-#
-#     leaf_barcodes = {n:[] for n in T.nodes() if T.degree(n) == 1 and n != max(T.nodes())}
-#
-#     for bar in dgm:
-#
-#         birth = bar[0]
-#         cycle_ind = find_nearest(heights,birth)
-#
-#         descendent_leaves = get_descendent_leaves(T,heights,cycle_ind)
-#         non_descendent_leaves = [n for n in T.nodes() if T.degree(n)==1 and n not in descendent_leaves and n != max(T.nodes())]
-#
-#
-#         non_descendent_LCAs = dict()
-#
-#         for n in non_descendent_leaves:
-#             LCA_idx_tmp, LCA_height_tmp = least_common_ancestor(T,heights,n,cycle_ind)
-#             non_descendent_LCAs[n] = LCA_idx_tmp
-#
-#         for leaf in descendent_leaves:
-#             leaf_barcodes[leaf] = leaf_barcodes[leaf]+[list(bar)]
-#
-#         for leaf in non_descendent_leaves:
-#             ancestor = non_descendent_LCAs[leaf]
-#             truncated_bar = truncate_bar(bar,heights[ancestor])
-#             if type(truncated_bar) == list:
-#                 leaf_barcodes[leaf] = leaf_barcodes[leaf] + [list(truncated_bar)]
-#
-#     return leaf_barcodes
-
-# def decorate_barcode_networks(dgm0,dgm1,heights,leaf_barcodes,tol = 1e-5):
-#
-#     decorated_barcode = {}
-#
-#     for (n,leaf_index) in enumerate(list(leaf_barcodes.keys())):
-#         birth = heights[leaf_index]
-#         bar_index = find_nearest(dgm0[:,0],birth)
-#         #bar_index = np.where((dgm0[:,0] > birth - tol)*(dgm0[:,0] < birth + tol))[0][0]
-#         bar = list(dgm0[bar_index,:])
-#         decorated_barcode[n] = [bar,leaf_barcodes[leaf_index]]
-#
-#     return decorated_barcode
-#
-# def get_all_decorated_merge_tree_data(G,f,infinity = None):
-#
-#     f = perturb_function(f)
-#     T, f_new, heights = filtered_network_to_merge_tree(G,f)
-#     spCpx, dgm0, dgm1 = get_barcodes_from_filtered_network(G,f,infinity = infinity)
-#     leaf_barcodes = decorate_merge_tree_networks(T,heights,dgm1)
-#     decorated_barcode = decorate_barcode_networks(dgm0,dgm1,heights,leaf_barcodes)
-#     decorated_barcode_clean = cleanup_decorated_barcode(decorated_barcode)
-#
-#     return T, f_new, heights, dgm0, dgm1, decorated_barcode_clean
-#
-# def remove_len_zero_bars(decorated_barcode, tol = 1e-5):
-#
-#     decorated_barcode_clean = {}
-#
-#     for key in decorated_barcode.keys():
-#         barcode0 = decorated_barcode[key][0]
-#         barcode1 = decorated_barcode[key][1]
-#         new_barcode1 = []
-#
-#         for bar in barcode1:
-#             if bar[1] - bar[0] > tol:
-#                 new_barcode1.append(bar)
-#
-#         decorated_barcode_clean[key] = [barcode0,new_barcode1]
-#
-#     return decorated_barcode_clean
 
 """
 Diffusion Frechet Functions
@@ -2155,142 +1940,3 @@ def simplify_merge_tree_image_network(T,height,tol = 1e-2):
     height_simplified = {n:max([height_simplified_1[n] - tol,0]) for n in T_simplified.nodes()}
 
     return T_simplified, height_simplified
-
-# def simplify_merge_tree_image_network(T,height,tol = 1e-2):
-#
-#     T_simplified_0, _ = simplify_merge_treeV2(T,height)
-#     T_simplified_1 = T_simplified_0.copy()
-#
-#     for edge in T_simplified_0.edges():
-#         if np.abs(height[edge[1]]-height[edge[0]]) < tol:
-#             if T_simplified_0.degree(edge[0]) == 1:
-#                 T_simplified_1.remove_node(edge[0])
-#             elif T_simplified_0.degree(edge[1]) == 1:
-#                 T_simplified_1.remove_node(edge[1])
-#
-#     T_simplified = T_simplified_1
-#     height_simplified = {n:height[n] for n in T_simplified.nodes()}
-#
-# #     for n in T_simplified.nodes():
-# #         if T_simplified.degree(n) == 1 and n != get_key(height,max(list(height.values())))[0]:
-# #             descendents = get_descendent_leaves(T,height,n)
-# #             height_simplified[n] = min([height[m] for m in descendents])
-# #         else:
-# #             height_simplified[n] = height[n]
-#
-#     T_simplified_0, _ = simplify_merge_treeV2(T_simplified_1,height_simplified)
-#     T_simplified = T_simplified_0.copy()
-#
-#     for edge in T_simplified_0.edges():
-#         if np.abs(height[edge[1]]-height[edge[0]]) < tol:
-#             if T_simplified_0.degree(edge[0]) == 1:
-#                 T_simplified.remove_node(edge[0])
-#             elif T_simplified_0.degree(edge[1]) == 1:
-#                 T_simplified.remove_node(edge[1])
-#
-#     height_simplified = {n:height[n] for n in T_simplified.nodes()}
-# #     height_simplified = {}
-# #     for n in T_simplified.nodes():
-# #         if T_simplified.degree(n) == 1 and n != get_key(height,max(list(height.values())))[0]:
-# #             descendents = get_descendent_leaves(T,height,n)
-# #             height_simplified[n] = min([height[m] for m in descendents])
-# #         else:
-# #             height_simplified[n] = height[n]
-#
-#     T_simplified_0, _ = simplify_merge_treeV2(T_simplified,height_simplified)
-#     T_simplified = T_simplified_0.copy()
-#
-#     for edge in T_simplified_0.edges():
-#         if np.abs(height[edge[1]]-height[edge[0]]) < tol:
-#             if T_simplified_0.degree(edge[0]) == 1:
-#                 T_simplified.remove_node(edge[0])
-#             elif T_simplified_0.degree(edge[1]) == 1:
-#                 T_simplified.remove_node(edge[1])
-#
-#     height_simplified = {}
-#     for n in T_simplified.nodes():
-#         if T_simplified.degree(n) == 1 and n != get_key(height,max(list(height.values())))[0]:
-#             descendents = get_descendent_leaves(T,height,n)
-#             height_simplified[n] = min([height[m] for m in descendents])
-#         else:
-#             height_simplified[n] = height[n]
-#
-#     T_simplified, height_simplified = simplify_merge_treeV2(T_simplified,height_simplified)
-#
-#     return T_simplified, height_simplified
-
-"""
-Deprecated
-"""
-# def get_merge_tree_from_network(G,f):
-#
-#     sorted_f = np.sort(np.unique(list(f.values())))
-#
-#     T = nx.Graph()
-#     merge_tree_heights = {}
-#
-#     node_name_iterator = 0
-#
-#     height = sorted_f[0]
-#     subgraph_nodes = [j for j in list(f.keys()) if f[j] <= height]
-#     H = G.subgraph(subgraph_nodes)
-#
-#     conn_comp_list = [list(c) for c in nx.connected_components(H)]
-#     conn_comp_dict = {}
-#
-#     for c in conn_comp_list:
-#         T.add_node(node_name_iterator)
-#         merge_tree_heights[node_name_iterator] = height
-#         conn_comp_dict[node_name_iterator] = c
-#         node_name_iterator += 1
-#
-#     for k in range(1,len(sorted_f)):
-#
-#         conn_comp_dict_prev = conn_comp_dict
-#
-#         height = sorted_f[k]
-#         subgraph_nodes = [j for j in list(f.keys()) if f[j] <= height]
-#         H = G.subgraph(subgraph_nodes)
-#
-#         conn_comp_list = [list(c) for c in nx.connected_components(H)]
-#         conn_comp_dict = {}
-#
-#         # Add vertices
-#         for c in conn_comp_list:
-#             T.add_node(node_name_iterator)
-#             merge_tree_heights[node_name_iterator] = height
-#             conn_comp_dict[node_name_iterator] = c
-#             node_name_iterator += 1
-#
-#         # Add edges from previous level
-#         for child_node in conn_comp_dict_prev:
-#             for parent_node in conn_comp_dict:
-#                 if conn_comp_dict_prev[child_node][0] in conn_comp_dict[parent_node]:
-#                     T.add_edge(child_node,parent_node)
-#
-#     return T, merge_tree_heights
-# def simplify_merge_tree(T,heights):
-#
-#     root = get_key(heights,max(list(heights.values())))[0]
-#
-#     TNew = nx.Graph()
-#     leaves = [n for n in T.nodes() if T.degree(n) == 1 and n != root]
-#     splits = [n for n in T.nodes() if T.degree(n) > 2 and n != root]
-#     new_nodes = leaves + splits + [root]
-#
-#     TNew.add_nodes_from(new_nodes)
-#
-#     new_edges = []
-#
-#     for node in new_nodes:
-#         shortest_path = nx.shortest_path(T, source = node, target = root)
-#         new_path = list(set(shortest_path).intersection(set(new_nodes)))
-#         if len(new_path) > 1:
-#             attaching_node = new_path[np.argmax([heights[n] for n in new_path])]
-#             new_edges.append((node,attaching_node))
-#
-#     TNew.add_edges_from(new_edges)
-#
-#     heightsNew = {n:heights[n] for n in new_nodes}
-#
-#     return TNew, heightsNew
