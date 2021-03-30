@@ -346,6 +346,11 @@ def get_ultramatrix(G,height,label):
 
 def get_ultramatrix_and_idx_dict(G,height,label):
 
+    """
+    Known Issue: This is extremely inefficient. Need to implement a way
+    to do this which uses the tree structure and doesn't run through a double for loop.
+    """
+
     inverted_label = invert_label_dict(label)
     idx_dict = dict()
 
@@ -416,6 +421,40 @@ def get_heights_and_subdivide_edges(G,height1,height2,mesh):
     all_heights = get_heights(height1,height2,mesh)
 
     return subdivide_edges(G,height1,all_heights)
+
+def simplify_merge_tree_with_threshold(T,height,thresh):
+
+    """
+    Simplifies a merge tree as follows. Makes a cut at the threshold height.
+    Below each vertex at the cut, all nodes are merged to a single leaf at the lowest
+    height for that branch.
+    """
+
+    subdiv_heights = [thresh]
+
+    T_sub, height_sub = subdivide_edges(T,height,subdiv_heights)
+
+    height_array = np.array(list(set(height_sub.values())))
+    height_array_thresh = height_array[height_array >= thresh]
+
+    kept_nodes = []
+
+    for j in range(len(height_array_thresh)):
+        kept_nodes += get_key(height_sub,height_array_thresh[j])
+
+    T_thresh = T_sub.subgraph(kept_nodes).copy()
+    height_thresh = {n:height_sub[n] for n in kept_nodes}
+
+    root = get_key(height_thresh,max(list(height_thresh.values())))[0]
+    T_thresh_leaves = [n for n in T_thresh.nodes() if T_thresh.degree(n) == 1 and n != root]
+
+    for n in T_thresh_leaves:
+        descendents = get_descendent_leaves(T_sub,height_sub,n)
+        descendent_node_rep = list(set(get_key(height_sub,min([height[node] for node in descendents]))).intersection(set(descendents)))[0]
+        T_thresh.add_edge(n,descendent_node_rep)
+        height_thresh[descendent_node_rep] = height_sub[descendent_node_rep]
+
+    return T_thresh, height_thresh
 
 """
 Below is the main function for estimating interleaving distance using Gromov-Wasserstein couplings.
@@ -617,7 +656,8 @@ def decorate_merge_tree(T, height, data, dgm):
             ancestor = non_descendent_LCAs[leaf][0]
             truncated_bar = truncate_bar(bar,height[ancestor])
             if type(truncated_bar) == list:
-                leaf_barcodes[leaf] = leaf_barcodes[leaf] + [list(truncated_bar)]
+                if truncated_bar[1] - truncated_bar[0] > 0:
+                    leaf_barcodes[leaf] = leaf_barcodes[leaf] + [list(truncated_bar)]
 
     return leaf_barcodes
 
@@ -1381,7 +1421,7 @@ def get_barcodes_from_filtered_network_with_2_simplices(G,f,dist = None, infinit
 Visualizing DMTs
 """
 
-def visualize_DMT_pointcloud(T,height,dgm1,data,tree_thresh,barcode_thresh,offset = 0.01,draw = True,verbose = False):
+def visualize_DMT_pointcloud(T,height,dgm1,data,tree_thresh,barcode_thresh,offset = 0.01,draw = True,verbose = False, return_data = True):
 
     """
     In:
@@ -1538,7 +1578,10 @@ def visualize_DMT_pointcloud(T,height,dgm1,data,tree_thresh,barcode_thresh,offse
         ax = plt.gca()
         ax.tick_params(left=True, bottom=False, labelleft=True, labelbottom=False)
 
-    return T_DMT, pos_DMT, edges, colors, weights
+    if return_data:
+        return T_DMT, pos_DMT, edges, colors, weights
+    else:
+        return
 
 """
 Image Networks Tools
