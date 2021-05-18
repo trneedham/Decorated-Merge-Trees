@@ -10,6 +10,6 @@ This repository will be regularly updated. Currently, the code is not optimized 
 
 We plan to add notebooks which recreate all of the figures in the paper. Please contact us with questions or to report any issues.
 
-**Update 5/17/21**
+## Update 5/17/21:
 
 Significant update to the code. Merge trees and decorated merge trees are now represented as classes and certain algorithms were more made more efficient. The tutorial notebook has been updated to reflect these changes.
