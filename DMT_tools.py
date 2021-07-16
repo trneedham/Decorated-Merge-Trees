@@ -1146,13 +1146,10 @@ def fusedGW_interleaving_decorated_trees(T1_sub,height1_sub,node_barcode1,
     C2New = C2[indices_2,:][:,indices_2]
 
     distMerge = matrix_ell_infinity_distance(C1New,C2New)
-
-    # labels1NewInverted = invert_label_dict(labels1New)
-    # labels2NewInverted = invert_label_dict(labels2New)
+    dist_l2 = np.sqrt(np.sum((C1New - C2New)**2))
 
     # Compute barcode matching distance
     distDgm = np.max([bottleneck(node_barcode1[pair[0]],node_barcode2[pair[1]]) for pair in Pi])
-
     distMax = max([distMerge,distDgm])
 
     ####
