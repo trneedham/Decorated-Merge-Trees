@@ -573,6 +573,17 @@ class MergeTree:
             self.label = None
             self.inverted_label = None
 
+    def subdivide(self,subdiv_heights):
+
+        T_sub = self.tree
+        height_sub = self.height
+
+        for h in subdiv_heights:
+            T_sub, height_sub = subdivide_edges_single_height(T_sub,height_sub,h)
+
+        self.tree = T_sub
+        self.height = height_sub
+
     def copy(self):
 
         return copy.copy(self)
@@ -849,7 +860,7 @@ def interleaving_subdivided_trees(T1_sub,height1_sub,T2_sub,height2_sub, verbose
     p2 = ot.unif(C2.shape[0])
 
     loss_fun = 'square_loss'
-    d, log = ot.gromov.gromov_wasserstein2(C1,C2,p1,p2,loss_fun)
+    d, log = ot.gromov.gromov_wasserstein2(C1,C2,p1,p2,loss_fun, log = True)
     coup = log['T']
 
     ####
@@ -1102,7 +1113,7 @@ def fusedGW_interleaving_decorated_trees(T1_sub,height1_sub,node_barcode1,
 
 
     # Compute FGW coupling
-    dist, log = ot.gromov.fused_gromov_wasserstein2(M,C1,C2,p1,p2,alpha = alpha, armijo = armijo)
+    dist, log = ot.gromov.fused_gromov_wasserstein2(M,C1,C2,p1,p2,alpha = alpha, armijo = armijo, log = True)
     coup = log['T']
 
     ####
