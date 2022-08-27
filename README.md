@@ -12,11 +12,3 @@ Curry, J., Hang, H., Mio, W. et al. Decorated merge trees for persistent topolog
 This repository will be regularly updated. Currently, the code is not optimized and was mainly developed to create examples for the paper. We will be fixing bugs and adding improvements to the code.
 
 We plan to add notebooks which recreate all of the figures in the paper. Please contact us with questions or to report any issues.
-
-## Update 7/16/21:
-
-Added notebook on point cloud classification.
-
-## Update 5/17/21:
-
-Significant update to the code. Merge trees and decorated merge trees are now represented as classes and certain algorithms were more made more efficient. The tutorial notebook has been updated to reflect these changes.
